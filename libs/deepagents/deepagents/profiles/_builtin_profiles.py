@@ -33,7 +33,7 @@ from deepagents.profiles.harness import (
     _openai_codex,
 )
 from deepagents.profiles.harness.harness_profiles import _HARNESS_PROFILES
-from deepagents.profiles.provider import _openai, _openrouter
+from deepagents.profiles.provider import _openai, _openrouter, _zai
 from deepagents.profiles.provider.provider_profiles import _PROVIDER_PROFILES
 
 logger = logging.getLogger(__name__)
@@ -147,6 +147,7 @@ def _ensure_builtin_profiles_loaded() -> None:
     try:
         _openai.register()
         _openrouter.register()
+        _zai.register()
         _anthropic_opus_4_7.register()
         _anthropic_sonnet_4_6.register()
         _anthropic_haiku_4_5.register()

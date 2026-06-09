@@ -38,6 +38,11 @@ from deepagents.profiles.provider._openrouter import (
     _openrouter_attribution_kwargs,
     check_openrouter_version,
 )
+from deepagents.profiles.provider._zai import (
+    ZAI_API_KEY_ENV,
+    ZAI_BASE_URL_ENV,
+    ZAI_CODING_BASE_URL,
+)
 from deepagents.profiles.provider.provider_profiles import (
     _PROVIDER_PROFILES,
     _merge_provider_profiles,
@@ -169,6 +174,51 @@ class TestResolveModel:
 
         mock.assert_called_once_with("anthropic:claude-sonnet-4-6")
         assert result is mock.return_value
+
+    def test_zai_prefix_maps_to_openai_client(self) -> None:
+        env = {ZAI_API_KEY_ENV: "zai-secret"}
+        with (
+            patch("deepagents._models.init_chat_model") as mock,
+            patch.dict("os.environ", env),
+        ):
+            mock.return_value = MagicMock(spec=BaseChatModel)
+            result = resolve_model("zai:glm-4.6")
+
+        # Prefix is stripped: z.ai receives the bare model name, not `zai:glm-4.6`.
+        mock.assert_called_once_with(
+            "glm-4.6",
+            model_provider="openai",
+            base_url=ZAI_CODING_BASE_URL,
+            api_key="zai-secret",
+            use_responses_api=False,
+        )
+        assert result is mock.return_value
+
+    def test_zai_base_url_env_overrides_default(self) -> None:
+        env = {ZAI_API_KEY_ENV: "zai-secret", ZAI_BASE_URL_ENV: "https://proxy.example/v1"}
+        with (
+            patch("deepagents._models.init_chat_model") as mock,
+            patch.dict("os.environ", env),
+        ):
+            mock.return_value = MagicMock(spec=BaseChatModel)
+            resolve_model("zai:glm-5.1")
+
+        _, kwargs = mock.call_args
+        assert kwargs["base_url"] == "https://proxy.example/v1"
+
+    def test_zai_missing_api_key_does_not_raise_at_resolution(self) -> None:
+        # Lazy-env: a missing ZAI_API_KEY surfaces only when the underlying
+        # client actually calls out, not when kwargs are composed.
+        with (
+            patch("deepagents._models.init_chat_model") as mock,
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            mock.return_value = MagicMock(spec=BaseChatModel)
+            resolve_model("zai:glm-4.6")
+
+        _, kwargs = mock.call_args
+        assert kwargs["api_key"] is None
+        assert kwargs["model_provider"] == "openai"
 
 
 class TestGetModelIdentifier:
