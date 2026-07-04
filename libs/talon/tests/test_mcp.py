@@ -184,9 +184,29 @@ def test_discover_mcp_config_paths_ignores_legacy_tools_json(
     assert discover_mcp_config_paths(config) == [config_path]
 
 
-def test_discover_mcp_config_paths_orders_global_before_assistant_local(
+@pytest.mark.parametrize(
+    ("global_content", "assistant_content", "expected"),
+    [
+        (
+            json.dumps({"mcpServers": {"global": {"type": "stdio", "command": "server"}}}),
+            json.dumps({"mcpServers": {"assistant": {"type": "stdio", "command": "server"}}}),
+            ("global", "assistant"),
+        ),
+        (
+            json.dumps({"mcpServers": {"global": {"type": "stdio", "command": "server"}}}),
+            None,
+            ("global",),
+        ),
+        (None, '{"mcpServers": {}}', ("assistant",)),
+        (None, "{bad", ("assistant",)),
+    ],
+)
+def test_discover_mcp_config_paths_returns_existing_configs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    global_content: str | None,
+    assistant_content: str | None,
+    expected: tuple[str, ...],
 ) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
@@ -194,49 +214,11 @@ def test_discover_mcp_config_paths_orders_global_before_assistant_local(
     config.ensure_home()
     global_path = home / ".deepagents" / ".mcp.json"
     assistant_path = config.manifest_dir / ".mcp.json"
-    _write_mcp_config(global_path, "global")
-    _write_mcp_config(assistant_path, "assistant")
+    paths = {"global": global_path, "assistant": assistant_path}
+    if global_content is not None:
+        global_path.parent.mkdir(parents=True)
+        global_path.write_text(global_content, encoding="utf-8")
+    if assistant_content is not None:
+        assistant_path.write_text(assistant_content, encoding="utf-8")
 
-    assert discover_mcp_config_paths(config) == [global_path, assistant_path]
-
-
-def test_discover_mcp_config_paths_preserves_global_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
-    config = TalonConfig.from_env({"AGENT_ASSISTANT_ID": "test"}, base_home=tmp_path)
-    config.ensure_home()
-    global_path = home / ".deepagents" / ".mcp.json"
-    _write_mcp_config(global_path, "global")
-
-    assert discover_mcp_config_paths(config) == [global_path]
-
-
-def test_discover_mcp_config_paths_includes_empty_mcp_servers_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
-    config = TalonConfig.from_env({"AGENT_ASSISTANT_ID": "test"}, base_home=tmp_path)
-    config.ensure_home()
-    config_path = config.manifest_dir / ".mcp.json"
-    config_path.write_text('{"mcpServers": {}}', encoding="utf-8")
-
-    assert discover_mcp_config_paths(config) == [config_path]
-
-
-def test_discover_mcp_config_paths_includes_malformed_json(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
-    config = TalonConfig.from_env({"AGENT_ASSISTANT_ID": "test"}, base_home=tmp_path)
-    config.ensure_home()
-    config_path = config.manifest_dir / ".mcp.json"
-    config_path.write_text("{bad", encoding="utf-8")
-
-    assert discover_mcp_config_paths(config) == [config_path]
+    assert discover_mcp_config_paths(config) == [paths[name] for name in expected]
