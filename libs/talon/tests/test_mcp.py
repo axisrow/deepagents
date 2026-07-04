@@ -3,14 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TypeAlias
+
+import pytest
 
 from deepagents_code.mcp_tools import MCPServerInfo as CodeMCPServerInfo, MCPToolInfo
 from deepagents_talon.config import TalonConfig
-from deepagents_talon.mcp import discover_mcp_config_paths, load_mcp_tools
-
-if TYPE_CHECKING:
-    import pytest
+from deepagents_talon.mcp import MCPConfigError, discover_mcp_config_paths, load_mcp_tools
 
 
 @dataclass(frozen=True)
@@ -122,6 +121,45 @@ async def test_load_mcp_tools_prefers_env_config_path(
     await load_mcp_tools(config)
 
     assert seen == [env_path]
+
+
+async def test_load_mcp_tools_rejects_malformed_assistant_config_over_global(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[Path] = []
+
+    async def fake_loader(path: str) -> FakeCodeLoaderResult:
+        seen.append(Path(path))
+        return _fake_code_loader(path)
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr("deepagents_talon.mcp.get_mcp_tools", fake_loader)
+    config = TalonConfig.from_env({"AGENT_ASSISTANT_ID": "test"}, base_home=tmp_path)
+    config.ensure_home()
+    global_path = home / ".deepagents" / ".mcp.json"
+    global_path.parent.mkdir(parents=True)
+    global_path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "global": {
+                        "type": "stdio",
+                        "command": "server",
+                    },
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+    local_path = config.manifest_dir / ".mcp.json"
+    local_path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(MCPConfigError):
+        await load_mcp_tools(config)
+
+    assert seen == [local_path]
 
 
 def test_discover_mcp_config_paths_ignores_legacy_tools_json(
