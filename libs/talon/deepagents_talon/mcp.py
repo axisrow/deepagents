@@ -16,6 +16,7 @@ from deepagents_code.mcp_tools import (
     MCPConfigError,
     MCPServerInfo,
     get_mcp_tools,
+    load_mcp_config_lenient,
 )
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ def discover_mcp_config_paths(config: TalonConfig) -> list[Path]:
         Path.home() / ".deepagents" / ".mcp.json",
         config.manifest_dir / ".mcp.json",
     ]
-    return [path for path in paths if _is_file(path)]
+    return [path for path in paths if _is_valid_mcp_config_file(path)]
 
 
 async def load_mcp_tools(config: TalonConfig) -> MCPTools:
@@ -131,3 +132,9 @@ def _is_file(path: Path) -> bool:
     except OSError:
         logger.warning("Could not inspect MCP config path %s", path, exc_info=True)
         return False
+
+
+def _is_valid_mcp_config_file(path: Path) -> bool:
+    if not _is_file(path):
+        return False
+    return load_mcp_config_lenient(path.expanduser()) is not None
