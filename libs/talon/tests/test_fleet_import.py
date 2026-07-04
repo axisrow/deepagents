@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import sys
 import zipfile
 from typing import TYPE_CHECKING
@@ -40,12 +41,15 @@ def test_import_fleet_zip_materializes_agent_files_and_mcp_notes(tmp_path: Path)
     assert result.config_ignored is True
     assert result.interrupt_tools == ("write_remote",)
     assert (target / "AGENTS.md").read_text(encoding="utf-8") == "root prompt"
-    assert (target / "skills" / "review" / "SKILL.md").is_file()
+    assert (target / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8") == (
+        "---\nname: review\n---\nReview things."
+    )
     assert (target / "subagents" / "researcher" / "AGENTS.md").is_file()
     assert not (target / "tools.json").exists()
     assert not (target / "config.json").exists()
     notes = (target / ".mcp.json.setup").read_text(encoding="utf-8")
     assert "Server: sample" in notes
+    assert "Tool count: 2" in notes
     assert "Scopes: researcher, root" in notes
     assert "Interrupt-enabled tools: write_remote" in notes
     assert '"allowedTools": [' in notes
@@ -125,16 +129,40 @@ def test_import_fleet_zip_rejects_malformed_tools_json(tmp_path: Path) -> None:
     source = tmp_path / "fleet.zip"
     _write_zip(source, {"AGENTS.md": "root prompt", "tools.json": "{bad"})
 
-    with pytest.raises(FleetImportError, match=r"tools\.json: malformed tools\.json"):
+    with pytest.raises(
+        FleetImportError,
+        match=rf"{source}: tools\.json: malformed tools\.json: Expecting property name",
+    ):
         import_fleet_zip(source, target_dir=tmp_path / "agent")
 
 
-def test_import_fleet_zip_rejects_unsafe_paths(tmp_path: Path) -> None:
+@pytest.mark.parametrize("path", ["../escape", "/escape", "C:/escape"])
+def test_import_fleet_zip_rejects_unsafe_paths(tmp_path: Path, path: str) -> None:
     source = tmp_path / "fleet.zip"
-    _write_zip(source, {"AGENTS.md": "root prompt", "../escape": "bad"})
+    _write_zip(source, {"AGENTS.md": "root prompt", path: "bad"})
 
-    with pytest.raises(FleetImportError, match=r"\.\./escape: unsafe zip path"):
+    with pytest.raises(FleetImportError, match="unsafe zip path"):
         import_fleet_zip(source, target_dir=tmp_path / "agent")
+
+
+def test_import_fleet_zip_rejects_symlink_entries_before_writing_target(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fleet.zip"
+    target = tmp_path / "agent"
+    target.mkdir()
+    (target / "AGENTS.md").write_text("existing prompt", encoding="utf-8")
+    symlink = zipfile.ZipInfo("skills/review/SKILL.md")
+    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("AGENTS.md", "new prompt")
+        archive.writestr(symlink, "../secret")
+
+    with pytest.raises(FleetImportError, match=r"skills/review/SKILL\.md: symlink"):
+        import_fleet_zip(source, target_dir=target)
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "existing prompt"
+    assert not (target / "skills").exists()
 
 
 def test_import_fleet_zip_rejects_unsafe_subagent_names(tmp_path: Path) -> None:
@@ -147,12 +175,146 @@ def test_import_fleet_zip_rejects_unsafe_subagent_names(tmp_path: Path) -> None:
 
 def test_import_fleet_zip_stdout_recommends_interrupt_env(tmp_path: Path) -> None:
     source = tmp_path / "fleet.zip"
-    _write_zip(source, {"AGENTS.md": "root prompt", "tools.json": json.dumps(_tools_json("root"))})
+    tools = _tools_json("root")
+    tools["tools"].append(
+        {
+            "name": "approve_remote",
+            "mcp_server_url": "https://tools.example/mcp",
+            "mcp_server_name": "sample",
+            "interrupt_config": True,
+        }
+    )
+    _write_zip(source, {"AGENTS.md": "root prompt", "tools.json": json.dumps(tools)})
 
     result = import_fleet_zip(source, target_dir=tmp_path / "agent")
 
     output = format_import_stdout(result)
-    assert f"{INTERRUPT_ON_TOOLS_ENV_KEY}=write_remote" in output
+    assert result.interrupt_tools == ("approve_remote", "write_remote")
+    assert f"{INTERRUPT_ON_TOOLS_ENV_KEY}=approve_remote,write_remote" in output
+
+
+def test_import_fleet_zip_removes_existing_mcp_notes_when_no_tools(tmp_path: Path) -> None:
+    source = tmp_path / "fleet.zip"
+    target = tmp_path / "agent"
+    target.mkdir()
+    (target / ".mcp.json.setup").write_text("stale notes", encoding="utf-8")
+    _write_zip(source, {"AGENTS.md": "root prompt", "tools.json": json.dumps({"tools": []})})
+
+    result = import_fleet_zip(source, target_dir=target)
+
+    assert result.mcp_notes is None
+    assert result.interrupt_tools == ()
+    assert not (target / ".mcp.json.setup").exists()
+    assert "MCP setup: no Fleet MCP tool requirements found" in format_import_stdout(result)
+
+
+def test_import_fleet_zip_sanitizes_secret_bearing_mcp_urls(tmp_path: Path) -> None:
+    source = tmp_path / "fleet.zip"
+    _write_zip(
+        source,
+        {
+            "AGENTS.md": "root prompt",
+            "tools.json": json.dumps(
+                {
+                    "tools": [
+                        {
+                            "name": "secure_lookup",
+                            "mcp_server_url": (
+                                "https://operator:password@tools.example/"
+                                "tenant/bearer-token/mcp?api_key=secret#oauth"
+                            ),
+                            "mcp_server_name": "secret server",
+                        },
+                    ],
+                    "interrupt_config": {},
+                }
+            ),
+        },
+    )
+
+    result = import_fleet_zip(source, target_dir=tmp_path / "agent")
+
+    assert result.mcp_notes is not None
+    assert "operator" not in result.mcp_notes
+    assert "password" not in result.mcp_notes
+    assert "api_key" not in result.mcp_notes
+    assert "secret#oauth" not in result.mcp_notes
+    assert "https://tools.example/tenant/<secret-redacted>/mcp" in result.mcp_notes
+    assert '"auth": "oauth"' in result.mcp_notes
+
+
+def test_import_fleet_zip_redacts_values_after_secret_path_markers(tmp_path: Path) -> None:
+    source = tmp_path / "fleet.zip"
+    _write_zip(
+        source,
+        {
+            "AGENTS.md": "root prompt",
+            "tools.json": json.dumps(
+                {
+                    "tools": [
+                        {
+                            "name": "token_lookup",
+                            "mcp_server_url": "https://tools.example/token/abcd1234/mcp",
+                            "mcp_server_name": "token server",
+                        },
+                        {
+                            "name": "key_lookup",
+                            "mcp_server_url": "https://tools.example/api_key/live-secret/mcp",
+                            "mcp_server_name": "key server",
+                        },
+                    ],
+                    "interrupt_config": {},
+                }
+            ),
+        },
+    )
+
+    result = import_fleet_zip(source, target_dir=tmp_path / "agent")
+
+    assert result.mcp_notes is not None
+    assert "abcd1234" not in result.mcp_notes
+    assert "live-secret" not in result.mcp_notes
+    assert "https://tools.example/<secret-redacted>/<secret-redacted>/mcp" in result.mcp_notes
+    assert "https://tools.example/<secret-redacted>/<secret-redacted>/mcp" in (
+        tmp_path / "agent" / ".mcp.json.setup"
+    ).read_text(encoding="utf-8")
+
+
+def test_import_fleet_zip_repeated_imports_refresh_generated_files(tmp_path: Path) -> None:
+    first = tmp_path / "first.zip"
+    second = tmp_path / "second.zip"
+    target = tmp_path / "agent"
+    _write_zip(
+        first,
+        {
+            "AGENTS.md": "first root",
+            "tools.json": json.dumps(_tools_json("root")),
+            "skills/review/SKILL.md": "first skill",
+            "subagents/researcher/AGENTS.md": "first subagent",
+        },
+    )
+    _write_zip(
+        second,
+        {
+            "AGENTS.md": "second root",
+            "skills/write/SKILL.md": "second skill",
+            "subagents/writer/AGENTS.md": "second subagent",
+        },
+    )
+
+    import_fleet_zip(first, target_dir=target)
+    import_fleet_zip(second, target_dir=target)
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "second root"
+    assert not (target / ".mcp.json.setup").exists()
+    assert not (target / "skills" / "review").exists()
+    assert (target / "skills" / "write" / "SKILL.md").read_text(encoding="utf-8") == (
+        "second skill"
+    )
+    assert not (target / "subagents" / "researcher").exists()
+    assert (target / "subagents" / "writer" / "AGENTS.md").read_text(
+        encoding="utf-8"
+    ) == "second subagent"
 
 
 def _write_zip(path: Path, files: dict[str, str]) -> None:
