@@ -2428,8 +2428,19 @@ def _create_model_via_init(
     )
 
     try:
-        if provider:
-            return init_chat_model(model_name, model_provider=provider, **kwargs)
+        # A provider profile may inject `model_provider` into kwargs to alias a
+        # custom endpoint onto a real LangChain client (e.g. the `zai` profile
+        # maps `zai:` onto `ChatOpenAI`). In that case the profile's value wins
+        # over the spec's provider prefix, which is an alias — not a real
+        # LangChain provider — and passing both would raise a "multiple values
+        # for keyword argument 'model_provider'" TypeError. Resolve to one
+        # value before the call; the original `provider` is still used for
+        # package diagnostics in the `except ImportError` branch below.
+        effective_provider = kwargs.pop("model_provider", None) or provider
+        if effective_provider:
+            return init_chat_model(
+                model_name, model_provider=effective_provider, **kwargs
+            )
         return init_chat_model(model_name, **kwargs)
     except ImportError as e:
         import importlib.util
