@@ -2,6 +2,12 @@
 
 # Deep Agents Changelog
 
+## Unreleased
+
+### Features
+
+* Built-in `zai` provider profile for z.ai GLM Coding Plan. z.ai exposes GLM models (`glm-5.1`, `glm-4.7`, `glm-4.6`, `glm-4.5-air`) over an OpenAI-compatible Chat Completions endpoint, but LangChain has no native `zai` provider. The profile maps the `zai:` prefix onto `langchain_openai.ChatOpenAI` pointed at `https://api.z.ai/api/coding/paas/v4`, reads `ZAI_API_KEY` (and optional `ZAI_BASE_URL`) lazily, and disables the Responses API the endpoint does not support. Use via `create_deep_agent(model="zai:glm-4.6")`. Because the profile sets an explicit `model_provider`, `resolve_model` now strips an aliased provider prefix so the model name reaches z.ai bare.
+
 ## [0.6.12](https://github.com/langchain-ai/deepagents/compare/deepagents==0.6.11...deepagents==0.6.12) (2026-06-25)
 
 This release adds the `deepagents[aws]` extra, which installs `langchain-aws` so Bedrock users get the automatic prompt caching integration added in [#4108](https://github.com/langchain-ai/deepagents/issues/4108).

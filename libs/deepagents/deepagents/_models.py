@@ -54,7 +54,44 @@ def resolve_model(model: str | BaseChatModel) -> BaseChatModel:
     if isinstance(model, BaseChatModel):
         return model
 
-    return init_chat_model(model, **apply_provider_profile(model))
+    kwargs = apply_provider_profile(model)
+    return init_chat_model(_strip_aliased_prefix(model, kwargs), **kwargs)
+
+
+def _strip_aliased_prefix(model: str, kwargs: dict[str, object]) -> str:
+    """Strip a profile-aliased provider prefix from a model spec.
+
+    When a `ProviderProfile` supplies an explicit `model_provider` (e.g. the
+    z.ai profile mapping `zai:` onto the OpenAI client), `init_chat_model` no
+    longer treats the spec's leading `provider:` segment as the provider and so
+    leaves it in the model name. That would send a name like `zai:glm-4.6` to
+    the upstream API instead of `glm-4.6`. Strip the leading segment here so the
+    bare model name reaches the provider.
+
+    Only applies when the profile set `model_provider` and the spec's prefix
+    differs from it — the prefix is the profile key (`zai`), not a real
+    LangChain provider. Specs whose profile omits `model_provider` (the OpenAI
+    and OpenRouter built-ins, and the no-profile default) are returned
+    unchanged, so `init_chat_model` keeps doing its own prefix parsing.
+
+    Args:
+        model: Model spec, possibly `provider:model`.
+        kwargs: Resolved profile kwargs for this spec.
+
+    Returns:
+        The model spec with an aliased prefix removed, or `model` unchanged.
+    """
+    provider = kwargs.get("model_provider")
+    prefix, sep, rest = model.partition(":")
+    if sep and isinstance(provider, str) and provider and prefix != provider:
+        logger.debug(
+            "Stripped aliased provider prefix %r from %r; profile maps it onto model_provider %r.",
+            prefix,
+            model,
+            provider,
+        )
+        return rest
+    return model
 
 
 def get_model_identifier(model: BaseChatModel) -> str | None:

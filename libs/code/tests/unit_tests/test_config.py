@@ -915,6 +915,43 @@ class TestCreateModelProfileExtraction:
         assert result.unsupported_modalities == frozenset()
 
 
+class TestCreateModelAliasedProvider:
+    """Provider profiles that set `model_provider` (e.g. `zai` → `openai`).
+
+    Regression: the spec's provider prefix is an alias, not a real LangChain
+    provider. The profile injects `model_provider` into kwargs, so the app path
+    must forward that single value to `init_chat_model` rather than passing the
+    alias as `model_provider` too (which raises "multiple values for keyword
+    argument 'model_provider'").
+    """
+
+    @pytest.fixture(autouse=True)
+    def _bypass_credential_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "deepagents_code.model_config.has_provider_credentials", lambda _: True
+        )
+
+    @patch("langchain.chat_models.init_chat_model")
+    def test_zai_alias_maps_to_openai_client(self, mock_init_chat_model: Mock) -> None:
+        """`zai:glm-4.6` reaches `init_chat_model` as `model_provider="openai"`.
+
+        The alias prefix is stripped and the profile's `model_provider` is the
+        single value forwarded — no duplicate-keyword TypeError.
+        """
+        mock_init_chat_model.return_value = Mock(spec=["invoke"])
+
+        create_model("zai:glm-4.6")
+
+        mock_init_chat_model.assert_called_once()
+        call_args, call_kwargs = mock_init_chat_model.call_args
+        # The model name reaches the client bare (alias prefix stripped).
+        assert call_args[0] == "glm-4.6"
+        # Exactly one model_provider is forwarded — the profile's, not the alias.
+        assert call_kwargs["model_provider"] == "openai"
+        assert call_kwargs["base_url"] == "https://api.z.ai/api/coding/paas/v4"
+        assert call_kwargs["use_responses_api"] is False
+
+
 class TestCreateModelSplitCredentialWiring:
     """`create_model` wires the split-credential diagnostic in correctly."""
 

@@ -645,6 +645,10 @@ _PROVIDER_DEPENDENCIES: dict[str, tuple[str, str]] = {
     "perplexity": ("langchain_perplexity", "perplexity"),
     "together": ("langchain_together", "together"),
     "xai": ("langchain_xai", "xai"),
+    # `zai` has no dedicated LangChain package — the SDK's built-in `zai`
+    # ProviderProfile aliases it onto `langchain_openai.ChatOpenAI` pointed at
+    # z.ai's Coding Plan endpoint, so it reuses the OpenAI extra.
+    "zai": ("langchain_openai", "openai"),
 }
 """Provider integration import modules and the extras that install them."""
 

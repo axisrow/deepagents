@@ -254,3 +254,6 @@ node_modules/
 
 # Generated at build time by libs/code/hatch_build.py (stamps the release commit)
 libs/code/deepagents_code/_build_info.py
+
+# CodeGraph local indexer state (machine-local: SQLite WAL/SHM, daemon pid, cache)
+.codegraph/

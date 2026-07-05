@@ -171,6 +171,13 @@ class TestHasProviderCredentials:
         ):
             assert has_provider_credentials("anthropic") is True
 
+    def test_zai_requires_api_key(self):
+        """z.ai (GLM Coding Plan) auth is gated on ZAI_API_KEY."""
+        with patch.dict("os.environ", {}, clear=True):
+            assert has_provider_credentials("zai") is False
+        with patch.dict("os.environ", {"ZAI_API_KEY": "zai-secret"}, clear=True):
+            assert has_provider_credentials("zai") is True
+
 
 @pytest.fixture
 def fake_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -2260,6 +2267,39 @@ class TestGetAvailableModels:
         assert any(
             "Could not import profiles" in record.message for record in caplog.records
         )
+
+    def test_includes_builtin_zai_catalog(self):
+        """z.ai has no LangChain package; models come from the built-in catalog."""
+        with patch(
+            "deepagents_code.model_config._load_provider_profiles",
+            side_effect=ImportError("not installed"),
+        ):
+            models = get_available_models()
+
+        assert "zai" in models
+        assert "glm-4.6" in models["zai"]
+        assert "glm-5.1" in models["zai"]
+
+    def test_config_models_take_precedence_over_builtin_catalog(self, tmp_path):
+        """A config-file `models` list for zai wins; built-in defaults are appended."""
+        config_path = tmp_path / "config.toml"
+        config_path.write_text("""
+[models.providers.zai]
+models = ["glm-4.6"]
+""")
+        with (
+            patch(
+                "deepagents_code.model_config._load_provider_profiles",
+                side_effect=ImportError("not installed"),
+            ),
+            patch.object(model_config, "DEFAULT_CONFIG_PATH", config_path),
+        ):
+            models = get_available_models()
+
+        # Config-listed model stays first (no duplication); built-in extras follow.
+        assert models["zai"][0] == "glm-4.6"
+        assert models["zai"].count("glm-4.6") == 1
+        assert "glm-5.1" in models["zai"]
 
 
 class TestGetAvailableModelsMergesConfig:

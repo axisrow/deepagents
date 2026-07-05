@@ -99,6 +99,7 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "perplexity": "Perplexity",
     "together": "Together AI",
     "xai": "xAI",
+    "zai": "z.ai (GLM Coding Plan)",
 }
 
 
@@ -136,6 +137,7 @@ PROVIDER_API_KEY_URLS: dict[str, str] = {
     "tavily": "https://app.tavily.com",
     "together": "https://api.together.ai/settings/api-keys",
     "xai": "https://console.x.ai/team/default/api-keys",
+    "zai": "https://z.ai/model-api",
 }
 
 
