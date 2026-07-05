@@ -93,6 +93,8 @@ _RECOMMENDED_MODELS: frozenset[str] = frozenset(
         "openrouter:openai/gpt-5.5-pro",
         "openrouter:z-ai/glm-5",
         "openrouter:z-ai/glm-5.1",
+        "zai:glm-4.7",
+        "zai:glm-5.1",
     }
 )
 """Hand-curated frontier-tier models promoted across the UI.

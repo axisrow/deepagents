@@ -514,6 +514,7 @@ PROVIDER_API_KEY_ENV: dict[str, str] = {
     "perplexity": "PPLX_API_KEY",
     "together": "TOGETHER_API_KEY",
     "xai": "XAI_API_KEY",
+    "zai": "ZAI_API_KEY",
 }
 """Well-known providers mapped to the env var that holds their API key.
 
@@ -555,6 +556,9 @@ PROVIDER_BASE_URL_ENV: dict[str, tuple[str, ...]] = {
     #                 PERPLEXITY_BASE_URL is what takes effect.
     #   together      ChatTogether reads TOGETHER_API_BASE (alias base_url).
     #   xai           ChatXAI reads XAI_API_BASE (alias base_url).
+    #   zai           GLM Coding Plan over the OpenAI-compatible endpoint; the
+    #                 deepagents SDK profile reads ZAI_BASE_URL to override the
+    #                 default z.ai Coding base URL.
     #
     # OpenAI-compatible providers (deepseek, openrouter, together, xai, baseten)
     # sit on the openai SDK, whose only base-URL env var is the shared
@@ -584,6 +588,7 @@ PROVIDER_BASE_URL_ENV: dict[str, tuple[str, ...]] = {
     "perplexity": ("PERPLEXITY_BASE_URL",),
     "together": ("TOGETHER_API_BASE",),
     "xai": ("XAI_API_BASE",),
+    "zai": ("ZAI_BASE_URL",),
 }
 """Every base-URL env var a provider's SDK may read.
 
@@ -634,6 +639,21 @@ OPTIONAL_AUTH_ENV: dict[str, str] = {"ollama": "OLLAMA_API_KEY"}
 
 PROVIDER_HOST_ENV: dict[str, str] = {"ollama": "OLLAMA_HOST"}
 """Provider-specific env vars that can point a local provider at a remote host."""
+
+BUILTIN_PROVIDER_MODELS: dict[str, tuple[str, ...]] = {
+    # Providers the deepagents SDK supports via a built-in OpenAI-compatible
+    # ProviderProfile but that have no LangChain package (so no `_profiles.py`
+    # to discover models from). Listing default models here lets them appear in
+    # `/model` out of the box; users can still add or override via config.toml.
+    #   zai  GLM Coding Plan — see deepagents.profiles.provider._zai.
+    "zai": ("glm-5.1", "glm-4.7", "glm-4.6", "glm-4.5-air"),
+}
+"""Default model catalogs for SDK providers with no LangChain profile package.
+
+`get_available_models` merges these in so the provider is selectable in `/model`
+without the user hand-editing config.toml. A config-file `models` list for the
+same provider takes precedence and any extras are appended.
+"""
 
 OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434"
 """Default endpoint assumed when no `base_url` or `OLLAMA_HOST` is configured."""
@@ -958,6 +978,17 @@ def get_available_models() -> dict[str, list[str]]:
                 "daemon may be down or have no pulls",
                 endpoint or OLLAMA_DEFAULT_BASE_URL,
             )
+
+    # Merge in built-in default catalogs for SDK providers that have no
+    # LangChain package to discover from (e.g. zai). Config-file models (merged
+    # above) take precedence; built-in defaults only fill gaps.
+    for provider_name, default_models in BUILTIN_PROVIDER_MODELS.items():
+        if not config.is_provider_enabled(provider_name):
+            continue
+        existing = available.get(provider_name, [])
+        merged_models = list(dict.fromkeys([*existing, *default_models]))
+        if merged_models:
+            available[provider_name] = merged_models
 
     _available_models_cache = available
     return available
