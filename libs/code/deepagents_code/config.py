@@ -2427,6 +2427,12 @@ def _create_model_via_init(
         UnknownProviderError,
     )
 
+    # Default to the spec's provider prefix; a provider profile may override
+    # this below by injecting `model_provider` into kwargs to alias a custom
+    # endpoint onto a real LangChain client (e.g. the `zai` profile maps `zai:`
+    # onto `ChatOpenAI`). Initialized before the `try` so the `except`
+    # ImportError branch can always read the resolved provider.
+    effective_provider = provider
     try:
         # A provider profile may inject `model_provider` into kwargs to alias a
         # custom endpoint onto a real LangChain client (e.g. the `zai` profile
@@ -2452,7 +2458,12 @@ def _create_model_via_init(
             "google_vertexai": "langchain-google-vertexai",
             "nvidia": "langchain-nvidia-ai-endpoints",
         }
-        package = package_map.get(provider, f"langchain-{provider}")
+        # An aliased provider (e.g. `zai`, mapped onto the OpenAI client by its
+        # provider profile) has no package of its own — `langchain-zai` does not
+        # exist. Diagnose against the real underlying provider the profile
+        # resolved to, so the missing-package hint names a package the user can
+        # actually install (`langchain-openai`, not `langchain-zai`).
+        package = package_map.get(effective_provider, f"langchain-{effective_provider}")
         # Convert pip package name to Python module name for import check.
         module_name = package.replace("-", "_")
         try:

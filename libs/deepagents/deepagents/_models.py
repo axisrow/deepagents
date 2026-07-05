@@ -63,6 +63,12 @@ def _strip_aliased_prefix(model: str, kwargs: dict[str, object]) -> str:
     provider = kwargs.get("model_provider")
     prefix, sep, rest = model.partition(":")
     if sep and isinstance(provider, str) and provider and prefix != provider:
+        logger.debug(
+            "Stripped aliased provider prefix %r from %r; profile maps it onto model_provider %r.",
+            prefix,
+            model,
+            provider,
+        )
         return rest
     return model
 
